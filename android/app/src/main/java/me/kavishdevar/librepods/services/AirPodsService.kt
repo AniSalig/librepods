@@ -102,7 +102,7 @@ import me.kavishdevar.librepods.data.StemAction
 import me.kavishdevar.librepods.data.XposedRemotePrefProvider
 import me.kavishdevar.librepods.data.isHeadTrackingData
 import me.kavishdevar.librepods.presentation.overlays.IslandType
-import me.kavishdevar.librepods.presentation.overlays.IslandWindow
+import me.kavishdevar.librepods.presentation.overlays.NotifWindow
 import me.kavishdevar.librepods.presentation.overlays.PopupWindow
 import me.kavishdevar.librepods.presentation.widgets.BatteryWidget
 import me.kavishdevar.librepods.presentation.widgets.NoiseControlWidget
@@ -705,7 +705,7 @@ class AirPodsService : Service(), SharedPreferences.OnSharedPreferenceChangeList
         val showIslandReceiver = object : BroadcastReceiver() {
             override fun onReceive(context: Context?, intent: Intent?) {
                 if (intent?.action == "me.kavishdevar.librepods.cross_device_island") {
-                    showIsland(
+                    showNotif(
                         this@AirPodsService,
                         batteryNotification.getBattery()
                             .find { it.component == BatteryComponent.LEFT }?.level!!.coerceAtMost(
@@ -972,7 +972,7 @@ class AirPodsService : Service(), SharedPreferences.OnSharedPreferenceChangeList
                     Log.d(TAG, "reverse tapped, disconnecting audio")
                     disconnectedBecauseReversed = true
                     disconnectAudio(this@AirPodsService, device)
-                    showIsland(
+                    showNotif(
                         this@AirPodsService,
                         (batteryNotification.getBattery()
                             .find { it.component == BatteryComponent.LEFT }?.level
@@ -986,7 +986,7 @@ class AirPodsService : Service(), SharedPreferences.OnSharedPreferenceChangeList
                     )
                 }
                 if (!aacpManager.owns) {
-                    showIsland(
+                    showNotif(
                         this@AirPodsService,
                         (batteryNotification.getBattery()
                             .find { it.component == BatteryComponent.LEFT }?.level
@@ -1005,7 +1005,7 @@ class AirPodsService : Service(), SharedPreferences.OnSharedPreferenceChangeList
             override fun onShowNearbyUI(sender: String) {
                 val senderName =
                     aacpManager.connectedDevices.find { it.mac == sender }?.type ?: "Other device"
-                showIsland(
+                showNotif(
                     this@AirPodsService,
                     (batteryNotification.getBattery()
                         .find { it.component == BatteryComponent.LEFT }?.level ?: 0).coerceAtMost(
@@ -1100,7 +1100,7 @@ class AirPodsService : Service(), SharedPreferences.OnSharedPreferenceChangeList
                     "Stem press received: $stemPressType on $bud, cameraActive: $cameraActive, cameraAction: ${config.cameraAction}"
                 )
                 if (cameraActive && config.cameraAction != null && stemPressType == config.cameraAction) {
-                        Runtime.getRuntime().exec(arrayOf("su", "-c", "input keyevent 27"))
+                    Runtime.getRuntime().exec(arrayOf("su", "-c", "input keyevent 27"))
                 } else {
                     val action = getActionFor(bud, stemPressType)
                     Log.d("AirPodsParser", "$bud $stemPressType action: $action")
@@ -1250,7 +1250,7 @@ class AirPodsService : Service(), SharedPreferences.OnSharedPreferenceChangeList
                     false, false
                 ) && islandWindow?.isVisible != true
             ) {
-                showIsland(
+                showNotif(
                     this@AirPodsService,
                     (batteryNotification.getBattery()
                         .find { it.component == BatteryComponent.LEFT }?.level ?: 0).coerceAtMost(
@@ -1673,26 +1673,52 @@ class AirPodsService : Service(), SharedPreferences.OnSharedPreferenceChangeList
     }
 
     var islandOpen = false
-    var islandWindow: IslandWindow? = null
+    var islandWindow: NotifWindow? = null
+
+//    @SuppressLint("MissingPermission")
+//    fun showIsland(
+//        service: Service,
+//        batteryPercentage: Int,
+//        type: IslandType = IslandType.CONNECTED,
+//        reversed: Boolean = false,
+//        otherDeviceName: String? = null
+//    ) {
+//        Log.d(TAG, "Showing island window")
+//        if (!sharedPreferences.getBoolean("show_island_popup", true)) {
+//            return
+//        }
+//        if (!Settings.canDrawOverlays(service)) {
+//            Log.d(TAG, "No permission for SYSTEM_ALERT_WINDOW")
+//            return
+//        }
+//        CoroutineScope(Dispatchers.Main).launch {
+//            islandWindow = IslandWindow(service.applicationContext)
+//            islandWindow!!.show(
+//                sharedPreferences.getString("name", "AirPods Pro").toString(),
+//                batteryPercentage,
+//                this@AirPodsService,
+//                type,
+//                reversed,
+//                otherDeviceName
+//            )
+//        }
+//    }
 
     @SuppressLint("MissingPermission")
-    fun showIsland(
+    fun showNotif(
         service: Service,
         batteryPercentage: Int,
         type: IslandType = IslandType.CONNECTED,
         reversed: Boolean = false,
         otherDeviceName: String? = null
     ) {
-        Log.d(TAG, "Showing island window")
+        Log.d(TAG, "Showing island notification")
         if (!sharedPreferences.getBoolean("show_island_popup", true)) {
             return
         }
-        if (!Settings.canDrawOverlays(service)) {
-            Log.d(TAG, "No permission for SYSTEM_ALERT_WINDOW")
-            return
-        }
+        // No SYSTEM_ALERT_WINDOW check needed: this is a normal notification, not an overlay
         CoroutineScope(Dispatchers.Main).launch {
-            islandWindow = IslandWindow(service.applicationContext)
+            islandWindow = NotifWindow(service.applicationContext)
             islandWindow!!.show(
                 sharedPreferences.getString("name", "AirPods Pro").toString(),
                 batteryPercentage,
@@ -2057,30 +2083,30 @@ class AirPodsService : Service(), SharedPreferences.OnSharedPreferenceChangeList
                     .setSmallIcon(R.drawable.airpods)
                     .setContentTitle(airpodsName ?: config.deviceName).setContentText(
                         """${
-                        batteryList?.find { it.component == BatteryComponent.LEFT }?.let {
-                            if (it.status != BatteryStatus.DISCONNECTED) {
-                                "L: ${if (it.status == BatteryStatus.CHARGING) "⚡" else ""} ${it.level}%"
-                            } else {
-                                ""
-                            }
-                        } ?: ""
-                    } ${
-                        batteryList?.find { it.component == BatteryComponent.RIGHT }?.let {
-                            if (it.status != BatteryStatus.DISCONNECTED) {
-                                "R: ${if (it.status == BatteryStatus.CHARGING) "⚡" else ""} ${it.level}%"
-                            } else {
-                                ""
-                            }
-                        } ?: ""
-                    } ${
-                        batteryList?.find { it.component == BatteryComponent.CASE }?.let {
-                            if (it.status != BatteryStatus.DISCONNECTED) {
-                                "Case: ${if (it.status == BatteryStatus.CHARGING) "⚡" else ""} ${it.level}%"
-                            } else {
-                                ""
-                            }
-                        } ?: ""
-                    }""").setContentIntent(pendingIntent).setCategory(Notification.CATEGORY_STATUS)
+                            batteryList?.find { it.component == BatteryComponent.LEFT }?.let {
+                                if (it.status != BatteryStatus.DISCONNECTED) {
+                                    "L: ${if (it.status == BatteryStatus.CHARGING) "⚡" else ""} ${it.level}%"
+                                } else {
+                                    ""
+                                }
+                            } ?: ""
+                        } ${
+                            batteryList?.find { it.component == BatteryComponent.RIGHT }?.let {
+                                if (it.status != BatteryStatus.DISCONNECTED) {
+                                    "R: ${if (it.status == BatteryStatus.CHARGING) "⚡" else ""} ${it.level}%"
+                                } else {
+                                    ""
+                                }
+                            } ?: ""
+                        } ${
+                            batteryList?.find { it.component == BatteryComponent.CASE }?.let {
+                                if (it.status != BatteryStatus.DISCONNECTED) {
+                                    "Case: ${if (it.status == BatteryStatus.CHARGING) "⚡" else ""} ${it.level}%"
+                                } else {
+                                    ""
+                                }
+                            } ?: ""
+                        }""").setContentIntent(pendingIntent).setCategory(Notification.CATEGORY_STATUS)
                     .setPriority(NotificationCompat.PRIORITY_LOW).setOngoing(true)
 
             if (disconnectedBecauseReversed) {
@@ -2505,7 +2531,7 @@ class AirPodsService : Service(), SharedPreferences.OnSharedPreferenceChangeList
                 )
                 otherDeviceTookOver = false
                 connectAudio(this, device)
-                showIsland(
+                showNotif(
                     this,
                     batteryNotification.getBattery()
                         .find { it.component == BatteryComponent.LEFT }?.level!!.coerceAtMost(
@@ -2616,7 +2642,7 @@ class AirPodsService : Service(), SharedPreferences.OnSharedPreferenceChangeList
 //                isConnectedLocally = true
             }
         }
-        showIsland(
+        showNotif(
             this,
             batteryNotification.getBattery()
                 .find { it.component == BatteryComponent.LEFT }?.level!!.coerceAtMost(
@@ -2841,7 +2867,7 @@ class AirPodsService : Service(), SharedPreferences.OnSharedPreferenceChangeList
         BluetoothConnectionManager.aacpSocket?.close()
         MediaController.pausedWhileTakingOver = false
         Log.d(TAG, "Disconnected from AirPods, showing island.")
-        showIsland(
+        showNotif(
             this,
             batteryNotification.getBattery()
                 .find { it.component == BatteryComponent.LEFT }?.level!!.coerceAtMost(
